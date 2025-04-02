@@ -41,7 +41,7 @@ import megamek.server.victory.VictoryResult;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
-
+import java.util.function.Predicate;
 import static java.util.stream.Collectors.toList;
 
 /**
@@ -490,13 +490,10 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
      * Returns the number of entities owned by the player, regardless of their
      * status.
      */
+
     public int getAllEntitiesOwnedBy(Player player) {
-        int count = 0;
-        for (Entity entity : inGameTWEntities()) {
-            if (entity.getOwner().equals(player)) {
-                count++;
-            }
-        }
+        int count = getLiveEntitiesOwnedBy(player, e -> true);
+
         for (Entity entity : vOutOfGame) {
             if (entity.getOwner().equals(player)) {
                 count++;
@@ -508,11 +505,13 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
     /**
      * @return the number of non-destroyed entities owned by the player
      */
-    public int getLiveEntitiesOwnedBy(Player player) {
+    public int getLiveEntitiesOwnedBy(Player player, Predicate<Entity> entityPredicate) {
         int count = 0;
         for (Entity entity : inGameTWEntities()) {
-            if (entity.getOwner().equals(player) && !entity.isDestroyed()
-                    && !entity.isCarcass()) {
+            if (entity.getOwner().equals(player)
+                  && !entity.isDestroyed()
+                  && !entity.isCarcass()
+                  && entityPredicate.test(entity)){
                 count++;
             }
         }
@@ -525,15 +524,7 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
      *         pilots.
      */
     public int getLiveDeployedEntitiesOwnedBy(Player player) {
-        int count = 0;
-        for (Entity entity : inGameTWEntities()) {
-            if (entity.getOwner().equals(player) && !entity.isDestroyed()
-                    && !entity.isCarcass()
-                    && !entity.isOffBoard() && !entity.isCaptured()) {
-                count++;
-            }
-        }
-        return count;
+        return getLiveEntitiesOwnedBy(player, e -> !e.isOffBoard() && !e.isCaptured());
     }
 
     /**
@@ -541,16 +532,7 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
      *         Ignores offboard units and captured Mek pilots.
      */
     public int getLiveCommandersOwnedBy(Player player) {
-        int count = 0;
-        for (Entity entity : inGameTWEntities()) {
-            if (entity.getOwner().equals(player) && !entity.isDestroyed()
-                    && !entity.isCarcass()
-                    && entity.isCommander() && !entity.isOffBoard()
-                    && !entity.isCaptured()) {
-                count++;
-            }
-        }
-        return count;
+        return getLiveEntitiesOwnedBy(player, e -> e.isCommander() && !e.isOffBoard() && !e.isCaptured());
     }
 
     /**
@@ -1974,24 +1956,27 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
         return false;
     }
 
+    private int countEntitieClassLeft(int playerId, int expectedClass){
+        Player player = getPlayer(playerId);
+        int count = 0;
+
+        for (Entity entity : inGameTWEntities()) {
+            if (player.equals(entity.getOwner())
+                  && entity.isSelectableThisTurn()
+                  && getEntityClass(entity) == expectedClass) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     /**
      * @param playerId the player's Id
      * @return number of infantry <code>playerId</code> has not selected yet this
      *         turn
      */
     public int getInfantryLeft(int playerId) {
-        Player player = getPlayer(playerId);
-        int remaining = 0;
-
-        for (Entity entity : inGameTWEntities()) {
-            if (player.equals(entity.getOwner())
-                    && entity.isSelectableThisTurn()
-                    && (entity instanceof Infantry)) {
-                remaining++;
-            }
-        }
-
-        return remaining;
+        return countEntitieClassLeft(playerId, EntityClassTurn.CLASS_INFANTRY);
     }
 
     /**
@@ -2000,18 +1985,7 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
      *         turn
      */
     public int getProtoMeksLeft(int playerId) {
-        Player player = getPlayer(playerId);
-        int remaining = 0;
-
-        for (Entity entity : inGameTWEntities()) {
-            if (player.equals(entity.getOwner())
-                    && entity.isSelectableThisTurn()
-                    && (entity instanceof ProtoMek)) {
-                remaining++;
-            }
-        }
-
-        return remaining;
+        return countEntitieClassLeft(playerId, EntityClassTurn.CLASS_PROTOMEK);
     }
 
     /**
@@ -2020,18 +1994,7 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
      *         turn
      */
     public int getVehiclesLeft(int playerId) {
-        Player player = getPlayer(playerId);
-        int remaining = 0;
-
-        for (Entity entity : inGameTWEntities()) {
-            if (player.equals(entity.getOwner())
-                    && entity.isSelectableThisTurn()
-                    && (entity instanceof Tank)) {
-                remaining++;
-            }
-        }
-
-        return remaining;
+        return countEntitieClassLeft(playerId, EntityClassTurn.CLASS_TANK);
     }
 
     /**
@@ -2039,18 +2002,7 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
      * @return number of 'Meks <code>playerId</code> has not selected yet this turn
      */
     public int getMeksLeft(int playerId) {
-        Player player = getPlayer(playerId);
-        int remaining = 0;
-
-        for (Entity entity : inGameTWEntities()) {
-            if (player.equals(entity.getOwner())
-                    && entity.isSelectableThisTurn()
-                    && (entity instanceof Mek)) {
-                remaining++;
-            }
-        }
-
-        return remaining;
+        return countEntitieClassLeft(playerId, EntityClassTurn.CLASS_MEK);
     }
 
     /**
@@ -2074,6 +2026,58 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
         return null;
     }
 
+    private int getEntityClass(Entity entity) {
+        if(entity instanceof Infantry) {return EntityClassTurn.CLASS_INFANTRY;}
+        if(entity instanceof ProtoMek) {return EntityClassTurn.CLASS_PROTOMEK;}
+        if(entity instanceof Tank) {return EntityClassTurn.CLASS_TANK;}
+        if(entity instanceof Mek) {return EntityClassTurn.CLASS_MEK;}
+        return -1;
+    }
+
+    private boolean handleTurnRemoval(Entity entity, int remainingUnits, String modOption, int expectedClass) {
+        if(getPhase().isMovement()  && getEntityClass(entity) == expectedClass  && (remainingUnits % getOptions().intOption(modOption)) != 1){
+            removeNextTurn(expectedClass);
+            return true;
+        }
+        return false;
+    }
+
+    private void removeNextTurn(int entityClass) {
+        synchronized (turnVector) {
+            if (hasMoreTurns()) {
+                GameTurn nextTurn = turnVector.elementAt(turnIndex + 1);
+                if (nextTurn instanceof EntityClassTurn ect) {
+                    if (ect.isValidClass(entityClass) && !ect.isValidClass(~entityClass)) {
+                        turnVector.removeElementAt(turnIndex + 1);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean useInfantryMoveLaterCheck(int entityClass) {
+        boolean infantryCheck = getOptions().booleanOption(OptionsConstants.INIT_INF_MOVE_LATER) && (entityClass == EntityClassTurn.CLASS_INFANTRY);
+        boolean protoMekCheck = getOptions().booleanOption(OptionsConstants.INIT_PROTOS_MOVE_LATER) && (entityClass == EntityClassTurn.CLASS_PROTOMEK);
+
+        return !(infantryCheck || protoMekCheck);
+    }
+
+    private void removeLastTurn(Entity entity) {
+        int entityClass = getEntityClass(entity);
+        boolean useCheck = useInfantryMoveLaterCheck(entityClass);
+
+        synchronized (turnVector) {
+            for (int i = turnVector.size() - 1; i >= turnIndex; i--) {
+                GameTurn turn = turnVector.elementAt(i);
+
+                if (turn.isValidEntity(entity, this, useCheck)) {
+                    turnVector.removeElementAt(i);
+                    break;
+                }
+            }
+        }
+    }
+
     /**
      * Removes the last, next turn found that the specified entity can move in.
      * Used when, say, an entity dies mid-phase.
@@ -2082,117 +2086,35 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
         if (turnVector.isEmpty()) {
             return;
         }
+
+        int playerId = entity.getOwner().getId();
+
         // If the game option "move multiple infantry per mek" is selected,
         // then we might not need to remove a turn at all.
         // A turn only needs to be removed when going from 4 inf (2 turns) to
         // 3 inf (1 turn)
-        if (getOptions().booleanOption(OptionsConstants.INIT_INF_MOVE_MULTI)
-                && (entity instanceof Infantry) && getPhase().isMovement()) {
-            if ((getInfantryLeft(entity.getOwnerId()) % getOptions().intOption(
-                    OptionsConstants.INIT_INF_PROTO_MOVE_MULTI)) != 1) {
-                // exception, if the _next_ turn is an infantry turn, remove that
-                // contrived, but may come up e.g. one inf accidentally kills another
-                synchronized (turnVector) {
-                    if (hasMoreTurns()) {
-                        GameTurn nextTurn = turnVector.elementAt(turnIndex + 1);
-                        if (nextTurn instanceof EntityClassTurn ect) {
-                            if (ect.isValidClass(EntityClassTurn.CLASS_INFANTRY)
-                                    && !ect.isValidClass(~EntityClassTurn.CLASS_INFANTRY)) {
-                                turnVector.removeElementAt(turnIndex + 1);
-                            }
-                        }
-                    }
-                }
-                return;
-            }
+        if (getOptions().booleanOption(OptionsConstants.INIT_INF_MOVE_MULTI) && handleTurnRemoval(entity, getInfantryLeft(playerId), OptionsConstants.INIT_INF_PROTO_MOVE_MULTI, EntityClassTurn.CLASS_INFANTRY)){
+            return;
         }
         // Same thing but for ProtoMeks
-        if (getOptions().booleanOption(OptionsConstants.INIT_PROTOS_MOVE_MULTI)
-                && (entity instanceof ProtoMek) && getPhase().isMovement()) {
-            if ((getProtoMeksLeft(entity.getOwnerId()) % getOptions()
-                    .intOption(OptionsConstants.INIT_INF_PROTO_MOVE_MULTI)) != 1) {
-                // exception, if the _next_ turn is an ProtoMek turn, remove that
-                // contrived, but may come up e.g. one inf accidentally kills another
-                synchronized (turnVector) {
-                    if (hasMoreTurns()) {
-                        GameTurn nextTurn = turnVector.elementAt(turnIndex + 1);
-                        if (nextTurn instanceof EntityClassTurn ect) {
-                            if (ect.isValidClass(EntityClassTurn.CLASS_PROTOMEK)
-                                    && !ect.isValidClass(~EntityClassTurn.CLASS_PROTOMEK)) {
-                                turnVector.removeElementAt(turnIndex + 1);
-                            }
-                        }
-                    }
-                }
-                return;
-            }
+        if (getOptions().booleanOption(OptionsConstants.INIT_PROTOS_MOVE_MULTI) && handleTurnRemoval(entity, getProtoMeksLeft(playerId), OptionsConstants.INIT_INF_PROTO_MOVE_MULTI, EntityClassTurn.CLASS_PROTOMEK)){
+            return;
         }
 
         // Same thing but for vehicles
-        if (getOptions().booleanOption(OptionsConstants.ADVGRNDMOV_VEHICLE_LANCE_MOVEMENT)
-                && (entity instanceof Tank) && getPhase().isMovement()) {
-            if ((getVehiclesLeft(entity.getOwnerId()) % getOptions()
-                    .intOption(OptionsConstants.ADVGRNDMOV_VEHICLE_LANCE_MOVEMENT_NUMBER)) != 1) {
-                // exception, if the _next_ turn is a tank turn, remove that
-                // contrived, but may come up e.g. one tank accidentally kills another
-                synchronized (turnVector) {
-                    if (hasMoreTurns()) {
-                        GameTurn nextTurn = turnVector.elementAt(turnIndex + 1);
-                        if (nextTurn instanceof EntityClassTurn ect) {
-                            if (ect.isValidClass(EntityClassTurn.CLASS_TANK)
-                                    && !ect.isValidClass(~EntityClassTurn.CLASS_TANK)) {
-                                turnVector.removeElementAt(turnIndex + 1);
-                            }
-                        }
-                    }
-                }
-                return;
-            }
+        if (getOptions().booleanOption(OptionsConstants.ADVGRNDMOV_VEHICLE_LANCE_MOVEMENT) && handleTurnRemoval(entity, getVehiclesLeft(playerId), OptionsConstants.ADVGRNDMOV_VEHICLE_LANCE_MOVEMENT_NUMBER, EntityClassTurn.CLASS_TANK)){
+            return;
         }
 
         // Same thing but for meks
-        if (getOptions().booleanOption(OptionsConstants.ADVGRNDMOV_MEK_LANCE_MOVEMENT)
-                && (entity instanceof Mek) && getPhase().isMovement()) {
-            if ((getMeksLeft(entity.getOwnerId()) % getOptions()
-                    .intOption(OptionsConstants.ADVGRNDMOV_MEK_LANCE_MOVEMENT_NUMBER)) != 1) {
-                // exception, if the _next_ turn is a mek turn, remove that
-                // contrived, but may come up e.g. one mek accidentally kills another
-                synchronized (turnVector) {
-                    if (hasMoreTurns()) {
-                        GameTurn nextTurn = turnVector.elementAt(turnIndex + 1);
-                        if (nextTurn instanceof EntityClassTurn ect) {
-                            if (ect.isValidClass(EntityClassTurn.CLASS_MEK)
-                                    && !ect.isValidClass(~EntityClassTurn.CLASS_MEK)) {
-                                turnVector.removeElementAt(turnIndex + 1);
-                            }
-                        }
-                    }
-                }
-                return;
-            }
+        if (getOptions().booleanOption(OptionsConstants.ADVGRNDMOV_MEK_LANCE_MOVEMENT) && handleTurnRemoval(entity, getVehiclesLeft(playerId), OptionsConstants.ADVGRNDMOV_MEK_LANCE_MOVEMENT_NUMBER, EntityClassTurn.CLASS_MEK)){
+            return;
         }
-
-        boolean useInfantryMoveLaterCheck = true;
         // If we have the "infantry move later" or "ProtoMeks move later" optional
         // rules, then we may be removing an infantry unit that would be
         // considered invalid unless we don't consider the extra validity
         // checks.
-        if ((getOptions().booleanOption(OptionsConstants.INIT_INF_MOVE_LATER) && (entity instanceof Infantry))
-                || (getOptions().booleanOption(OptionsConstants.INIT_PROTOS_MOVE_LATER)
-                        && (entity instanceof ProtoMek))) {
-            useInfantryMoveLaterCheck = false;
-        }
-
-        synchronized (turnVector) {
-            for (int i = turnVector.size() - 1; i >= turnIndex; i--) {
-                GameTurn turn = turnVector.elementAt(i);
-
-                if (turn.isValidEntity(entity, this, useInfantryMoveLaterCheck)) {
-                    turnVector.removeElementAt(i);
-                    break;
-                }
-            }
-        }
+        removeLastTurn(entity);
     }
 
     /**
@@ -3359,66 +3281,6 @@ public final class Game extends AbstractGame implements Serializable, PlanetaryC
             entitiesInCache.addAll(entityPosLookup.get(c));
         }
         return count;
-    }
-
-    /**
-     * A check to ensure that the position cache is properly updated. This
-     * is only used for debugging purposes, and will cause a number of things
-     * to slow down.
-     */
-    @SuppressWarnings(value = "unused")
-    private void checkPositionCacheConsistency() {
-        // Sanity check on the position cache
-        // This could be removed once we are confident the cache is working
-        List<Integer> entitiesInCache = new ArrayList<>();
-        List<Integer> entitiesInVector = new ArrayList<>();
-        int entitiesInCacheCount = countEntitiesInCache(entitiesInCache);
-        int entityVectorSize = 0;
-        for (Entity e : inGameTWEntities()) {
-            if (e.getPosition() != null) {
-                entityVectorSize++;
-                entitiesInVector.add(e.getId());
-            }
-        }
-        Collections.sort(entitiesInCache);
-        Collections.sort(entitiesInVector);
-        if ((entitiesInCacheCount != entityVectorSize) && !getPhase().isDeployment()
-                && !getPhase().isExchange() && !getPhase().isLounge()
-                && !getPhase().isInitiativeReport() && !getPhase().isInitiative()) {
-            logger.warn("Entities vector has " + inGameTWEntities().size()
-                    + " but pos lookup cache has " + entitiesInCache.size() + "entities!");
-            List<Integer> missingIds = new ArrayList<>();
-            for (Integer id : entitiesInVector) {
-                if (!entitiesInCache.contains(id)) {
-                    missingIds.add(id);
-                }
-            }
-            logger.info("Missing ids: " + missingIds);
-        }
-        for (Entity e : inGameTWEntities()) {
-            HashSet<Coords> positions = e.getOccupiedCoords();
-            for (Coords c : positions) {
-                HashSet<Integer> ents = entityPosLookup.get(c);
-                if ((ents != null) && !ents.contains(e.getId())) {
-                    logger.warn("Entity " + e.getId() + " is in "
-                            + e.getPosition() + " however the position cache "
-                            + "does not have it in that position!");
-                }
-            }
-        }
-        for (Coords c : entityPosLookup.keySet()) {
-            for (Integer eId : entityPosLookup.get(c)) {
-                Entity e = getEntity(eId);
-                if (e == null) {
-                    continue;
-                }
-                HashSet<Coords> positions = e.getOccupiedCoords();
-                if (!positions.contains(c)) {
-                    logger.warn("Entity Position Cache thinks Entity " + eId
-                            + "is in " + c + " but the Entity thinks it's in " + e.getPosition());
-                }
-            }
-        }
     }
 
     /**
